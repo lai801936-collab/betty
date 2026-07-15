@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>雲林基督教醫院 - 手術室自主排班系統</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 基礎表格樣式 (單線無縫隙) */
+        .roster-table { border-collapse: separate; border-spacing: 0; width: 100%; min-width: max-content; }
+        .roster-table th, .roster-table td { 
+            border-bottom: 1px solid #d1d5db; 
+            border-right: 1px solid #d1d5db; 
+            text-align: center; 
+            vertical-align: middle;
+            height: 38px;
+            padding: 4px;
+            box-sizing: border-box;
+        }
+        .roster-table th:first-child, .roster-table td:first-child { border-left: 1px solid #d1d5db; }
+        .roster-table tr:first-child th { border-top: 1px solid #d1d5db; }
+        .roster-table th { background-color: #f3f4f6; font-weight: 600; }
+        
+        /* 凍結左側兩欄 (精確鎖定寬度) */
+        .sticky-col-1 { 
+            position: sticky; left: 0; z-index: 20; 
+            background-color: #f3f4f6; 
+            width: 70px !important; min-width: 70px !important; max-width: 70px !important; 
+        }
+        .sticky-col-2 { 
+            position: sticky; left: 70px; z-index: 20; 
+            background-color: #f3f4f6; 
+            width: 100px !important; min-width: 100px !important; max-width: 100px !important; 
+            box-shadow: 2px 0 4px -2px rgba(0,0,0,0.1); 
+        }
+        
+        .roster-table tbody .sticky-col-1, .roster-table tbody .sticky-col-2 { background-color: #ffffff; }
+        .roster-table tfoot .sticky-col-1, .roster-table tfoot .sticky-col-2 { background-color: #f3f4f6; }
+        
+        /* 週末與特殊班別顏色 */
+        .weekend-bg { background-color: #fef08a !important; }
+        .shift-D { background-color: #e0f2fe; color: #0369a1; font-weight: 500; }
+        .shift-E { background-color: #fef3c7; color: #b45309; font-weight: 500; }
+        .shift-N { background-color: #f3e8ff; color: #7e22ce; font-weight: 500; }
+        .shift-R { background-color: #ffe4e6; color: #e11d48; font-weight: 500; }
+        .shift-C { background-color: #dcfce7; color: #15803d; font-weight: 500; }
+        
+        /* 預假優先順序框線 */
+        .border-red-priority { border: 2px solid #ef4444 !important; }
+        .border-green-priority { border: 2px solid #22c55e !important; }
+
+        /* 列印專屬設定 */
+        @media print {
+            @page { size: A4 landscape; margin: 1cm; }
+            body { font-size: 10pt; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            .no-print { display: none !important; }
+            .roster-table th, .roster-table td { border-color: #000; height: 32px; font-size: 11pt; }
+            .sticky-col-1, .sticky-col-2 { 
+                position: static !important; box-shadow: none !important;
+                width: auto !important; min-width: auto !important; max-width: auto !important;
+            }
+            .delete-btn { display: none !important; }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 font-sans min-h-screen pb-10">
+
+    <!-- 頂部控制列 -->
+    <div class="bg-blue-800 text-white p-4 shadow-md no-print mb-4 sticky top-0 z-40">
+        <div class="max-w-screen-2xl mx-auto flex flex-wrap justify-between items-center gap-4">
+            <div>
+                <h1 class="text-xl font-bold">雲林基督教醫院手術室 - 自主排班系統</h1>
+                <p class="text-sm text-blue-200 mt-1">依據手術室自主排班管理規範設計</p>
+            </div>
+            <div class="flex items-center gap-3">
+                <select id="yearSelect" class="text-black rounded px-2 py-1 bg-white border border-gray-300"></select>
+                <span class="font-bold">年</span>
+                <select id="monthSelect" class="text-black rounded px-2 py-1 bg-white border border-gray-300"></select>
+                <span class="font-bold">月</span>
+                <button onclick="changeMonth()" class="bg-blue-600 hover:bg-blue-500 border border-blue-400 px-4 py-1.5 rounded shadow text-sm font-medium transition-colors">
+                    切換月份
+                </button>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                <!-- 新增人員按鈕在此 -->
+                <button onclick="openAddEmpModal()" class="bg-green-600 hover:bg-green-500 px-3 py-1.5 rounded shadow text-sm font-medium flex items-center gap-1 transition-colors">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                    新增人員
+                </button>
+                <button onclick="openRulesModal()" class="bg-yellow-600 hover:bg-yellow-500 px-3 py-1.5 rounded shadow text-sm font-medium transition-colors">
+                    📖 規範說明
+                </button>
+                <!-- 新增儲存資料按鈕 -->
+                <button onclick="saveData()" class="bg-teal-600 hover:bg-teal-500 px-3 py-1.5 rounded shadow text-sm font-medium flex items-center gap-1 transition-colors" title="儲存在本機">
+                    💾 儲存
+                </button>
+                
+                <!-- 新增匯出/匯入按鈕 -->
+                <button onclick="exportData()" class="bg-orange-600 hover:bg-orange-500 px-3 py-1.5 rounded shadow text-sm font-medium flex items-center gap-1 transition-colors" title="匯出檔案分享給其他人">
+                    📤 匯出進度
+                </button>
+                <button onclick="document.getElementById('importFileInput').click()" class="bg-purple-600 hover:bg-purple-500 px-3 py-1.5 rounded shadow text-sm font-medium flex items-center gap-1 transition-colors" title="讀取其他人分享的檔案">
+                    📥 匯入進度
+                </button>
+                <input type="file" id="importFileInput" class="hidden" accept=".json" onchange="importData(event)">
+
+                <button onclick="window.print()" class="bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded shadow text-sm font-medium flex items-center gap-1 transition-colors">
+                    🖨️ 列印/匯出PDF
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 主表格區塊 -->
+    <div class="max-w-screen-2xl mx-auto bg-white shadow-lg rounded-lg overflow-hidden border border-gray-200">
+        <div class="overflow-x-auto">
+            <table class="roster-table text-sm" id="rosterTable">
+                <thead id="rosterThead">
+                    <!-- JS 動態生成日期與星期 -->
+                </thead>
+                <tbody id="rosterTbody">
+                    <!-- JS 動態生成人員與班別格子 -->
+                </tbody>
+                <tfoot id="rosterTfoot" class="font-medium">
+                    <!-- JS 動態生成每日統計 -->
+                </tfoot>
+            </table>
+        </div>
+    </div>
+
+    <!-- ===== 彈出視窗：排班鍵盤 ===== -->
+    <div id="shiftModal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex justify-center items-end sm:items-center z-50">
+        <div class="bg-white w-full sm:w-96 rounded-t-xl sm:rounded-xl shadow-2xl p-5 transform transition-transform">
+            <div class="flex justify-between items-center mb-4 border-b pb-2">
+                <h3 class="text-lg font-bold text-gray-800" id="shiftModalTitle">選擇班別</h3>
+                <button onclick="closeShiftModal()" class="text-gray-500 hover:text-red-500 font-bold text-xl">&times;</button>
+            </div>
+            
+            <div id="shiftErrorMsg" class="hidden bg-red-100 border border-red-400 text-red-700 px-3 py-2 rounded mb-3 text-sm font-medium"></div>
+            <div class="mb-2 text-sm text-gray-600" id="redGreenStatus"></div>
+
+            <div class="grid grid-cols-4 gap-2 mb-4">
+                <button onclick="setShift('D')" class="py-2 rounded bg-blue-100 hover:bg-blue-200 text-blue-800 font-bold border border-blue-300 shadow-sm">D</button>
+                <button onclick="setShift('E')" class="py-2 rounded bg-yellow-100 hover:bg-yellow-200 text-yellow-800 font-bold border border-yellow-300 shadow-sm">E</button>
+                <button onclick="setShift('C')" class="py-2 rounded bg-purple-100 hover:bg-purple-200 text-purple-800 font-bold border border-purple-300 shadow-sm">C</button>
+                <button onclick="setShift('控')" class="py-2 rounded bg-green-100 hover:bg-green-200 text-green-800 font-bold border border-green-300 shadow-sm">控</button>
+                
+                <button onclick="setShift('R')" class="py-2 rounded bg-red-100 hover:bg-red-200 text-red-800 font-bold border border-red-300 shadow-sm">R</button>
+                <button onclick="setShift('R', 'red')" class="py-1 rounded bg-red-50 hover:bg-red-100 text-red-700 font-bold border-2 border-red-500 text-xs flex flex-col items-center justify-center leading-tight shadow-sm">R<span class="scale-75">紅框優先</span></button>
+                <button onclick="setShift('R', 'green')" class="py-1 rounded bg-green-50 hover:bg-green-100 text-green-700 font-bold border-2 border-green-500 text-xs flex flex-col items-center justify-center leading-tight shadow-sm">R<span class="scale-75">綠框次之</span></button>
+                <button onclick="setShift('')" class="py-2 rounded bg-gray-100 hover:bg-gray-300 text-gray-700 font-bold border border-gray-300 shadow-sm">清空</button>
+            </div>
+            <div class="border-t pt-3">
+                <label class="block text-xs text-gray-500 mb-1">自訂/其他班別 (如 D1, E4, 等)：</label>
+                <div class="flex gap-2">
+                    <input type="text" id="customShiftInput" class="border border-gray-300 rounded px-2 py-1 flex-1 text-sm uppercase" placeholder="輸入代號">
+                    <button onclick="setCustomShift()" class="bg-gray-800 text-white px-3 py-1 rounded text-sm hover:bg-gray-700">套用</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== 彈出視窗：新增人員 ===== -->
+    <div id="addEmpModal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex justify-center items-center z-50">
+        <div class="bg-white w-80 rounded-xl shadow-2xl p-5">
+            <h3 class="text-lg font-bold mb-4 text-blue-800 border-b pb-2">➕ 新增護理人員</h3>
+            <div id="addEmpErrorMsg" class="hidden bg-red-100 border border-red-400 text-red-700 px-3 py-2 rounded mb-3 text-sm font-medium"></div>
+            <label class="block text-sm text-gray-600 mb-1">人員代號</label>
+            <input type="text" id="newEmpId" placeholder="例如: 812345" class="w-full border p-2 mb-3 rounded focus:ring-2 focus:ring-blue-500 outline-none">
+            
+            <label class="block text-sm text-gray-600 mb-1">人員姓名</label>
+            <input type="text" id="newEmpName" placeholder="例如: 陳小明" class="w-full border p-2 mb-5 rounded focus:ring-2 focus:ring-blue-500 outline-none">
+            
+            <div class="flex justify-end gap-2">
+                <button onclick="closeAddEmpModal()" class="px-4 py-2 text-gray-600 bg-gray-100 rounded hover:bg-gray-200 font-medium transition-colors">取消</button>
+                <button onclick="confirmAddEmployee()" class="px-4 py-2 text-white bg-green-600 rounded hover:bg-green-700 font-medium transition-colors shadow">確認新增</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== 彈出視窗：確認刪除人員 ===== -->
+    <div id="deleteEmpModal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex justify-center items-center z-50">
+        <div class="bg-white w-80 rounded-xl shadow-2xl p-5">
+            <h3 class="text-lg font-bold mb-2 text-red-600 border-b pb-2">⚠️ 確認刪除</h3>
+            <p class="text-sm text-gray-700 mb-5 mt-3 whitespace-pre-line" id="deleteEmpText">確定要刪除這名人員及其所有的排班紀錄嗎？此動作無法復原。</p>
+            <div class="flex justify-end gap-2">
+                <button onclick="closeDeleteEmpModal()" class="px-4 py-2 text-gray-600 bg-gray-100 rounded hover:bg-gray-200 font-medium transition-colors">取消</button>
+                <button onclick="confirmDeleteEmployee()" class="px-4 py-2 text-white bg-red-600 rounded hover:bg-red-700 font-medium transition-colors shadow">確定刪除</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== 彈出視窗：規範說明 ===== -->
+    <div id="rulesModal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex justify-center items-center z-50 p-4">
+        <div class="bg-white w-full max-w-2xl max-h-[80vh] overflow-y-auto rounded-xl shadow-2xl p-6">
+            <div class="flex justify-between items-center mb-4 border-b pb-2">
+                <h2 class="text-xl font-bold text-blue-800">手術室自主排班管理規範摘要</h2>
+                <button onclick="closeRulesModal()" class="text-gray-500 hover:text-red-500 font-bold text-2xl">&times;</button>
+            </div>
+            <div class="space-y-4 text-sm text-gray-700 leading-relaxed">
+                <div class="bg-red-50 p-3 rounded border-l-4 border-red-500"><strong class="text-red-600">1. 優先順序：</strong><br> - 紅框 (第一優先)：每人每月最多2個時段假日班，不要限制天數。<br> - 綠框 (第二優先)：每人每月最多2個時段假日班，不要限制天數。</div>
+                <div class="bg-blue-50 p-3 rounded border-l-4 border-blue-500"><strong class="text-blue-600">2. 休假與工時：</strong><br> - 每月至少 8 天休假。<br> - 連續休假上限為 7 天 (含假日)。<br> - 每日平日放假人數上限：2~3 人。</div>
+                <div class="bg-purple-50 p-3 rounded border-l-4 border-purple-500"><strong class="text-purple-600">3. 排班安全 (防呆機制)：</strong><br> - 兩班之間至少 11 小時休息 (禁止跳班，例如大夜接白班)。</div>
+                <div class="bg-green-50 p-3 rounded border-l-4 border-green-500"><strong class="text-green-600">4. 每日人力配置：</strong><br> - 白班(D): 16人<br> - 中班(E4,D7): 2人<br> - 小夜(E5,E): 2人<br> - 大夜(C): 1人</div>
+            </div>
+            <div class="mt-6 text-center">
+                <button onclick="closeRulesModal()" class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 font-medium">我瞭解了</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== 提示訊息 (Toast) ===== -->
+    <div id="toastMsg" class="fixed bottom-5 right-5 bg-gray-800 text-white px-5 py-3 rounded shadow-xl transform transition-all duration-300 translate-y-20 opacity-0 z-50 font-medium flex items-center gap-2 pointer-events-none">
+        <svg class="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+        <span id="toastText">儲存成功！</span>
+    </div>
+
+    <script>
+        let currentYear = new Date().getFullYear();
+        let currentMonth = new Date().getMonth() + 1;
+        
+        // 預設員工資料
+        let employees = [
+            { id: "801936", name: "賴秀苗" }, { id: "802031", name: "張好涓" },
+            { id: "802300", name: "黃如潔" }, { id: "816088", name: "林宜錦" },
+            { id: "816206", name: "楊育鈞" }, { id: "816834", name: "陳安琪" },
+            { id: "816912", name: "林敏麗" }, { id: "817496", name: "黃敏雯" }
+        ];
+
+        let scheduleData = {};
+        let currentEditEmpId = null;
+        let currentEditDate = null;
+
+        window.onload = () => {
+            loadData(); // 網頁載入時自動讀取存檔
+            initSelects();
+            changeMonth();
+        };
+
+        // 讀取資料
+        function loadData() {
+            const savedEmp = localStorage.getItem('rosterEmployees');
+            const savedSchedule = localStorage.getItem('rosterScheduleData');
+            
+            if (savedEmp) {
+                try { employees = JSON.parse(savedEmp); } catch(e) {}
+            }
+            if (savedSchedule) {
+                try { scheduleData = JSON.parse(savedSchedule); } catch(e) {}
+            }
+        }
+
+        // 儲存資料
+        function saveData() {
+            localStorage.setItem('rosterEmployees', JSON.stringify(employees));
+            localStorage.setItem('rosterScheduleData', JSON.stringify(scheduleData));
+            showToast("排班資料已成功儲存於本機！");
+        }
+
+        // 匯出資料 (產生 JSON 檔案下載)
+        function exportData() {
+            const dataToExport = {
+                employees: employees,
+                scheduleData: scheduleData
+            };
+            const dataStr = JSON.stringify(dataToExport);
+            const blob = new Blob([dataStr], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `手術室排班_${currentYear}年${currentMonth}月.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            showToast("✅ 已下載排班進度檔！請分享給下一位人員。");
+        }
+
+        // 匯入資料 (讀取 JSON 檔案)
+        function importData(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const importedData = JSON.parse(e.target.result);
+                    if (importedData.employees && importedData.scheduleData) {
+                        employees = importedData.employees;
+                        scheduleData = importedData.scheduleData;
+                        
+                        saveData(); // 匯入後自動存入本機
+                        renderTable();
+                        showToast("📥 匯入成功！已更新為最新進度。");
+                    } else {
+                        showToast("❌ 檔案格式錯誤，無法讀取。");
+                    }
+                } catch (error) {
+                    showToast("❌ 讀取檔案失敗！");
+                }
+            };
+            reader.readAsText(file);
+            // 清空 input，允許重複匯入同一個檔案
+            event.target.value = ''; 
+        }
+
+        // 顯示浮動提示訊息
+        function showToast(msg) {
+            const toast = document.getElementById("toastMsg");
+            const toastText = document.getElementById("toastText");
+            toastText.innerText = msg;
+            toast.classList.remove("translate-y-20", "opacity-0");
+            setTimeout(() => {
+                toast.classList.add("translate-y-20", "opacity-0");
+            }, 2500);
+        }
+
+        function initSelects() {
+            const yearSelect = document.getElementById("yearSelect");
+            const monthSelect = document.getElementById("monthSelect");
+            const today = new Date();
+            for (let i = today.getFullYear() - 1; i <= today.getFullYear() + 2; i++) {
+                yearSelect.add(new Option(i, i, false, i === currentYear));
+            }
+            for (let i = 1; i <= 12; i++) {
+                monthSelect.add(new Option(i, i, false, i === currentMonth));
+            }
+        }
+
+        function changeMonth() {
+            currentYear = parseInt(document.getElementById("yearSelect").value);
+            currentMonth = parseInt(document.getElementById("monthSelect").value);
+            
+            const monthKey = `${currentYear}-${currentMonth}`;
+            if (!scheduleData[monthKey]) scheduleData[monthKey] = {};
+            
+            employees.forEach(emp => {
+                if (!scheduleData[monthKey][emp.id]) scheduleData[monthKey][emp.id] = {};
+            });
+            renderTable();
+        }
+
+        function renderTable() {
+            const thead = document.getElementById("rosterThead");
+            const tbody = document.getElementById("rosterTbody");
+            const tfoot = document.getElementById("rosterTfoot");
+            
+            const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
+            const monthKey = `${currentYear}-${currentMonth}`;
+
+            // 生成 Thead
+            let dateRow = `<tr><th class="sticky-col-1" rowspan="2">代號</th><th class="sticky-col-2" rowspan="2">姓名</th>`;
+            let dayRow = `<tr>`;
+            const weekDays = ['日', '一', '二', '三', '四', '五', '六'];
+
+            for (let d = 1; d <= daysInMonth; d++) {
+                let dateObj = new Date(currentYear, currentMonth - 1, d);
+                let dayOfWeek = dateObj.getDay();
+                let isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
+                let bgClass = isWeekend ? 'weekend-bg' : '';
+                
+                dateRow += `<th class="${bgClass}">${d}</th>`;
+                dayRow += `<th class="${bgClass}">${weekDays[dayOfWeek]}</th>`;
+            }
+            dateRow += `</tr>`;
+            dayRow += `</tr>`;
+            thead.innerHTML = dateRow + dayRow;
+
+            // 生成 Tbody
+            let tbodyHtml = '';
+            employees.forEach(emp => {
+                tbodyHtml += `<tr class="employee-row hover:bg-blue-50 transition-colors">`;
+                tbodyHtml += `<td class="sticky-col-1 text-xs sm:text-sm">${emp.id}</td>`;
+                
+                // 【優化】將刪除按鈕改成永遠顯示的垃圾桶圖示，方便手機操作
+                tbodyHtml += `<td class="sticky-col-2 p-1">
+                                <div class="flex items-center justify-between w-full h-full px-1">
+                                    <span class="whitespace-nowrap font-medium text-gray-700 truncate">${emp.name}</span>
+                                    <button onclick="deleteEmployee('${emp.id}')" class="delete-btn text-red-400 hover:text-red-600 hover:bg-red-50 p-1 rounded transition-colors" title="刪除人員">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                        </svg>
+                                    </button>
+                                </div>
+                              </td>`;
+                
+                for (let d = 1; d <= daysInMonth; d++) {
+                    let cellData = scheduleData[monthKey][emp.id][d] || { val: '', type: 'normal' };
+                    let cellClasses = ['cursor-pointer', 'transition-all', 'hover:opacity-70'];
+                    
+                    if (cellData.val) {
+                        if (cellData.val.startsWith('D')) cellClasses.push('shift-D');
+                        else if (cellData.val.startsWith('E')) cellClasses.push('shift-E');
+                        else if (cellData.val === 'C' || cellData.val === 'N') cellClasses.push('shift-N');
+                        else if (cellData.val === 'R') cellClasses.push('shift-R');
+                        else cellClasses.push('shift-C');
+                    }
+
+                    if (cellData.type === 'red') cellClasses.push('border-red-priority');
+                    if (cellData.type === 'green') cellClasses.push('border-green-priority');
+
+                    tbodyHtml += `<td class="${cellClasses.join(' ')}" onclick="openShiftModal('${emp.id}', ${d})">${cellData.val || ''}</td>`;
+                }
+                tbodyHtml += `</tr>`;
+            });
+            tbody.innerHTML = tbodyHtml;
+
+            // 生成 Tfoot (統計區)
+            let tfootHtml = '';
+            const statsCategories = [
+                { key: 'D', label: '白班(D)' },
+                { key: 'E', label: '小/中(E)' },
+                { key: 'N', label: '大夜(C)' },
+                { key: 'R', label: '休假(R)' },
+                { key: 'O', label: '其他班別' }
+            ];
+
+            statsCategories.forEach(cat => {
+                tfootHtml += `<tr>
+                    <th class="sticky-col-1 text-transparent bg-gray-100 border-none">.</th>
+                    <th class="sticky-col-2 text-right pr-2 py-1 bg-gray-100">${cat.label} 統計</th>`;
+                for (let d = 1; d <= daysInMonth; d++) {
+                    let count = countDailyShift(monthKey, d, cat.key);
+                    let textClass = (cat.key === 'R' && count > 3) ? 'text-red-600 font-bold bg-red-50' : 'text-gray-600';
+                    tfootHtml += `<td class="bg-gray-100 ${textClass}">${count > 0 ? count : ''}</td>`;
+                }
+                tfootHtml += `</tr>`;
+            });
+            tfoot.innerHTML = tfootHtml;
+        }
+
+        function countDailyShift(monthKey, day, category) {
+            let count = 0;
+            employees.forEach(emp => {
+                let shift = scheduleData[monthKey][emp.id][day]?.val || '';
+                if (!shift) return;
+                shift = shift.toUpperCase();
+                
+                switch(category) {
+                    case 'D': 
+                        if (shift.startsWith('D') && shift !== 'D7') count++;
+                        break;
+                    case 'E': 
+                        if (shift.startsWith('E') || shift === 'D7') count++;
+                        break;
+                    case 'N': 
+                        if (shift === 'C' || shift === 'N') count++;
+                        break;
+                    case 'R': 
+                        if (shift === 'R') count++;
+                        break;
+                    case 'O': 
+                        if (shift !== 'R' && shift !== 'C' && shift !== 'N' && !shift.startsWith('D') && !shift.startsWith('E')) {
+                            count++;
+                        }
+                        break;
+                }
+            });
+            return count;
+        }
+
+        function openShiftModal(empId, date) {
+            currentEditEmpId = empId;
+            currentEditDate = date;
+            
+            const empName = employees.find(e => e.id === empId).name;
+            document.getElementById("shiftModalTitle").innerText = `${empName} - ${currentMonth}/${date} 排班`;
+            document.getElementById("shiftErrorMsg").classList.add("hidden");
+            document.getElementById("customShiftInput").value = '';
+            
+            const monthKey = `${currentYear}-${currentMonth}`;
+            let redCount = 0, greenCount = 0;
+            for (let d in scheduleData[monthKey][empId]) {
+                if (scheduleData[monthKey][empId][d].type === 'red') redCount++;
+                if (scheduleData[monthKey][empId][d].type === 'green') greenCount++;
+            }
+            document.getElementById("redGreenStatus").innerHTML = `本月優先假已劃記：<span class="text-red-600 font-bold">紅框 ${redCount} 天</span> | <span class="text-green-600 font-bold">綠框 ${greenCount} 天</span>`;
+
+            document.getElementById("shiftModal").classList.remove("hidden");
+        }
+
+        function closeShiftModal() {
+            document.getElementById("shiftModal").classList.add("hidden");
+        }
+
+        function setCustomShift() {
+            let val = document.getElementById("customShiftInput").value.trim().toUpperCase();
+            if (val) setShift(val);
+        }
+
+        function setShift(val, priorityType = 'normal') {
+            const monthKey = `${currentYear}-${currentMonth}`;
+            
+            // 已經移除紅綠框的「天數上限」防呆阻擋，因為規範改為「時段」不限制天數
+            
+            if (val !== '' && val !== 'R' && !val.includes('控')) {
+                if (val.startsWith('D')) {
+                    let prevDayShift = scheduleData[monthKey][currentEditEmpId][currentEditDate - 1]?.val || '';
+                    if (prevDayShift === 'C' || prevDayShift === 'N') {
+                        showError("⛔ 違反規範：前一天為大夜班，接白班未達 11 小時休息時間！");
+                        return;
+                    }
+                }
+                if (val === 'C' || val === 'N') {
+                    let nextDayShift = scheduleData[monthKey][currentEditEmpId][currentEditDate + 1]?.val || '';
+                    if (nextDayShift.startsWith('D')) {
+                        showError("⛔ 違反規範：隔天已排白班，排大夜班未達 11 小時休息時間！");
+                        return;
+                    }
+                }
+            }
+
+            if (val === '') {
+                delete scheduleData[monthKey][currentEditEmpId][currentEditDate];
+            } else {
+                scheduleData[monthKey][currentEditEmpId][currentEditDate] = { val: val, type: priorityType };
+            }
+            
+            closeShiftModal();
+            renderTable();
+        }
+
+        function showError(msg) {
+            const errorDiv = document.getElementById("shiftErrorMsg");
+            errorDiv.innerText = msg;
+            errorDiv.classList.remove("hidden");
+        }
+
+        // 新增人員 Modal 控制
+        function openAddEmpModal() { 
+            document.getElementById("addEmpErrorMsg").classList.add("hidden");
+            document.getElementById("newEmpId").value = '';
+            document.getElementById("newEmpName").value = '';
+            document.getElementById("addEmpModal").classList.remove("hidden"); 
+        }
+        function closeAddEmpModal() { document.getElementById("addEmpModal").classList.add("hidden"); }
+        
+        // 確認新增人員邏輯
+        function confirmAddEmployee() {
+            const id = document.getElementById("newEmpId").value.trim();
+            const name = document.getElementById("newEmpName").value.trim();
+            const errorDiv = document.getElementById("addEmpErrorMsg");
+
+            if (!id || !name) { 
+                errorDiv.innerText = "請完整填寫代號與姓名！";
+                errorDiv.classList.remove("hidden");
+                return; 
+            }
+            if (employees.find(e => e.id === id)) { 
+                errorDiv.innerText = "代號已存在，請更換！";
+                errorDiv.classList.remove("hidden");
+                return; 
+            }
+            
+            errorDiv.classList.add("hidden");
+            employees.push({ id, name });
+            const monthKey = `${currentYear}-${currentMonth}`;
+            if(!scheduleData[monthKey]) scheduleData[monthKey] = {};
+            scheduleData[monthKey][id] = {};
+            
+            closeAddEmpModal();
+            renderTable();
+        }
+
+        // 刪除人員邏輯
+        let empIdToDelete = null;
+        function deleteEmployee(id) {
+            empIdToDelete = id;
+            const empName = employees.find(e => e.id === id)?.name || '';
+            document.getElementById("deleteEmpText").innerText = `確定要刪除「${empName}」嗎？\n此人員及其所有的排班紀錄將被移除，且無法復原。`;
+            document.getElementById("deleteEmpModal").classList.remove("hidden");
+        }
+        
+        function closeDeleteEmpModal() {
+            empIdToDelete = null;
+            document.getElementById("deleteEmpModal").classList.add("hidden");
+        }
+
+        function confirmDeleteEmployee() {
+            if (empIdToDelete) {
+                employees = employees.filter(e => e.id !== empIdToDelete);
+                renderTable();
+            }
+            closeDeleteEmpModal();
+        }
+
+        function openRulesModal() { document.getElementById("rulesModal").classList.remove("hidden"); }
+        function closeRulesModal() { document.getElementById("rulesModal").classList.add("hidden"); }
+    </script>
+</body>
+</html>
